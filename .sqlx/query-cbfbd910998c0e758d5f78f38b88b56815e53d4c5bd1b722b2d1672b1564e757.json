@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT booking_id, user_id, room_id, start_time, end_time, status FROM bookings",
+  "describe": {
+    "columns": [
+      {
+        "name": "booking_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "user_id",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "room_id",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "start_time",
+        "ordinal": 3,
+        "type_info": "Datetime"
+      },
+      {
+        "name": "end_time",
+        "ordinal": 4,
+        "type_info": "Datetime"
+      },
+      {
+        "name": "status",
+        "ordinal": 5,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "cbfbd910998c0e758d5f78f38b88b56815e53d4c5bd1b722b2d1672b1564e757"
+}
