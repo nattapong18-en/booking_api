@@ -6,48 +6,17 @@ use axum::{
 };
 use sqlx::SqlitePool;
 use axum::extract::Path;    
-use crate::models::{BookingRecord, BookingState, CreateBookingRequest};
+use crate::models::{BookingRecord, BookingState, CreateBookingRequest, AppError, Claims};
 
-// pub async fn create_booking(State(pool): State<SqlitePool>,Json(payload): Json<CreateBookingRequest>) -> Json<BookingRecord> {
-//       println!("Received booking request for room {}: {:?}", payload.room_id, payload);
-      
-//       let insert_result = sqlx::query!(
-//         r#"
-//         INSERT INTO bookings (user_id, room_id, start_time, end_time, status) 
-//         VALUES (?, ?, ?, ?, ?)"#,
-//         payload.user_id,
-//         payload.room_id,
-//         payload.start_time,
-//         payload.end_time,
-//         "Pending"
-//       )
-//        .execute(&pool)
-//        .await
-//        .unwrap();
-      
-      
-//       let booking_id = insert_result.last_insert_rowid() as i32;
-
-//       let response = BookingRecord {
-//         booking_id,
-//         user_id: payload.user_id,
-//         room_id: payload.room_id,
-//         start_time: payload.start_time,
-//         end_time:payload.end_time,
-//         state: BookingState::Pending,
-//       };
-//       Json(response)
-// }
-
-pub async fn get_bookings(State(pool): State<SqlitePool>) -> Json<Vec<BookingRecord>> {
-    println!("Fetching all bookings...");
+pub async fn get_bookings(State(pool): State<SqlitePool>) -> Result<Json<Vec<BookingRecord>>, AppError> {
+    tracing::info!("Fetching all bookings...");
 
     let rows = sqlx::query!(
         "SELECT booking_id, user_id, room_id, start_time, end_time, status FROM bookings"
     )
     .fetch_all(&pool)
-    .await
-    .unwrap();
+    .await?;
+    
     let mut bookings_list = Vec::new();
 
     for row in rows {
@@ -66,39 +35,39 @@ pub async fn get_bookings(State(pool): State<SqlitePool>) -> Json<Vec<BookingRec
             state: current_state,
         });
     }
-    Json(bookings_list)
+    Ok(Json(bookings_list))
 }
-pub async fn cancel_booking(State(pool): State<SqlitePool>, Path(booking_id):Path<i32>) -> impl IntoResponse {
-        println!("Cancelling booking id: {}", booking_id);
+pub async fn cancel_booking(claims:Claims ,State(pool): State<SqlitePool>, Path(booking_id):Path<i32>) -> Result<impl IntoResponse, AppError> {
         
+        tracing::info!("Cancelling booking id: {}", booking_id);
         let result = sqlx::query!(
-            "UPDATE bookings SET status = 'Cancelled' WHERE booking_id = ?",
-            booking_id
+            "UPDATE bookings SET status = 'Cancelled' WHERE booking_id And user_id = ?",
+            claims.user_id,
         )
         .execute(&pool)
-        .await
-        .unwrap();
+        .await?;
+        
        
         if result.rows_affected() > 0 {
-            return (StatusCode::OK, format!("Booking {} cancelled successfully", booking_id)).into_response();
+             Ok((StatusCode::OK, format!("Booking {} cancelled successfully", booking_id)).into_response())
         } else {
-            return (StatusCode::NOT_FOUND, format!("Booking {} not found", booking_id)).into_response();
+             Err(AppError::NotFound(format!("Booking {} not found", booking_id)))
         }
         
         
 }
 
-pub async fn get_user_booking(State(pool): State<SqlitePool>, Path(user_id): Path<i32>) -> Json<Vec<BookingRecord>> {
-    println!("Fetching bookings for user id: {}", user_id);
+pub async fn get_user_booking(State(pool): State<SqlitePool>, Path(user_id): Path<i32>) -> Result<Json<Vec<BookingRecord>>, AppError> {
+    tracing::info!("Fetching bookings for user id: {}", user_id);
 
     let rows = sqlx::query!(
         "SELECT booking_id, user_id, room_id, start_time, end_time, status FROM bookings WHERE user_id = ?",
         user_id
     )
     .fetch_all(&pool)
-    .await
-    .unwrap();
-    
+    .await?;
+
+
     let mut bookings_list = Vec::new();
 
     for row in rows {
@@ -116,53 +85,94 @@ pub async fn get_user_booking(State(pool): State<SqlitePool>, Path(user_id): Pat
             state: current_state,
         });
     }
-    Json(bookings_list)
+    Ok(Json(bookings_list))
 }
 
-pub async fn create_booking(State(pool): State<SqlitePool>, Json(paload): Json<CreateBookingRequest>) -> impl IntoResponse {
-        println!("Received booking request for room {}", paload.room_id);
-        let mut tx = pool.begin().await.unwrap();
+pub async fn create_booking(State(pool): State<SqlitePool>, Json(payload): Json<CreateBookingRequest>) -> Result<impl IntoResponse, AppError> {
+        tracing::info!("Received booking request for room {}", payload.room_id);
+        if payload.start_time >= payload.end_time {
+            return Err(AppError::BadRequest("Request is overlap".to_string()));
+        } 
+        
+        let current_time = chrono::Utc::now();
+        if payload.start_time < current_time {
+            return Err(AppError::BadRequest("Time Error".to_string()));
+        }
+        
+        let mut tx = pool.begin().await?;
         
         let over_lap_check = sqlx::query!(
             "SELECT COUNT(*) as count FROM bookings WHERE room_id = ? AND status != 'Cancelled' AND start_time < ? AND end_time > ?",
-            paload.room_id,
-            paload.end_time,
-            paload.start_time
+            payload.room_id,
+            payload.end_time,
+            payload.start_time
         )
         .fetch_one(&mut *tx)
-        .await
-        .unwrap();
+        .await?;
+        
       
         if over_lap_check.count > 0 {
-            return (StatusCode::CONFLICT, "Booking time overlaps with an existing booking".to_string()).into_response();
+             Err(AppError::Conflict("Booking time overlaps with an existing booking".to_string()))
         } else {
             let insert_result = sqlx::query!(
                 r#"
                 INSERT INTO bookings (user_id, room_id, start_time, end_time, status) 
                 VALUES (?, ?, ?, ?, ?)"#,
-                paload.user_id,
-                paload.room_id,
-                paload.start_time,
-                paload.end_time,
+                payload.user_id,
+                payload.room_id,
+                payload.start_time,
+                payload.end_time,
                 "Confirmed"
             )
             .execute(&mut *tx)
-            .await
-            .unwrap();
+            .await?;
             
-            tx.commit().await.unwrap();
             
+            tx.commit().await?;
+
             let booking_id = insert_result.last_insert_rowid() as i32;
             
             let response = BookingRecord {
                 booking_id,
-                user_id: paload.user_id,
-                room_id: paload.room_id,
-                start_time: paload.start_time,
-                end_time: paload.end_time,
+                user_id: payload.user_id,
+                room_id: payload.room_id,
+                start_time: payload.start_time,
+                end_time: payload.end_time,
                 state: BookingState::Confirmed,
             };
-            return Json(response).into_response();
+             Ok(Json(response).into_response())
         }
         
 }
+
+
+#[cfg(test)]
+mod tests {
+    use sqlx::{ sqlite::SqlitePoolOptions};
+    use tower::ServiceExt;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_booking_invalid_time(){
+        let pool = SqlitePoolOptions::new().connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+        let payload = serde_json::json!({
+            "user_id": 1,
+            "room_id":101,
+            "start_time": "2020-01-01T10:00:00Z",
+            "end_time": "2020-01-01T10:00:00Z"
+        });
+        let req = axum::http::Request::builder().uri("/bookings").method("POST").header("Content-Type", "application/json")
+        .body(axum::body::Body::from(payload.to_string())).unwrap();
+        let app = axum::Router::new()
+        .route("/bookings", axum::routing::post(create_booking))
+        .with_state(pool);
+        
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST)
+    }
+
+    
+}
+

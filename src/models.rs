@@ -1,5 +1,36 @@
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use axum::{http::StatusCode, response::{IntoResponse, Response}};
+
+pub enum AppError {
+    DatabaseError(sqlx::Error),
+    NotFound(String),
+    Conflict(String),
+    BadRequest(String),
+}
+
+impl From<sqlx::Error> for AppError {
+    fn from(inner: sqlx::Error) -> Self {
+        AppError::DatabaseError(inner)
+    }
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        let(status, error_message) = match self {
+           AppError::DatabaseError(err) => {
+             tracing::error!("Database error: {:?}", err);
+             (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error".to_string())
+           }
+           AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.to_string()), 
+           AppError::Conflict(msg) => (StatusCode::CONFLICT, msg.to_string()),
+           AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.to_string()),
+        };
+        (status, axum::Json(serde_json::json!({"error": error_message}))).into_response()
+    }
+}
+
+
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum BookingState {
@@ -24,4 +55,10 @@ pub struct BookingRecord {
     pub start_time: DateTime<Utc>,
     pub end_time: DateTime<Utc>,
     pub state: BookingState,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Claims {
+    pub user_id: i32,
+    pub exp: usize,
 }
