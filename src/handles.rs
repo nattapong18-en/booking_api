@@ -41,8 +41,9 @@ pub async fn cancel_booking(claims:Claims ,State(pool): State<SqlitePool>, Path(
         
         tracing::info!("Cancelling booking id: {}", booking_id);
         let result = sqlx::query!(
-            "UPDATE bookings SET status = 'Cancelled' WHERE booking_id And user_id = ?",
-            claims.user_id,
+            "UPDATE bookings SET status = 'Cancelled' WHERE booking_id = ? And user_id = ?",
+            booking_id,
+            claims.user_id
         )
         .execute(&pool)
         .await?;
@@ -52,9 +53,7 @@ pub async fn cancel_booking(claims:Claims ,State(pool): State<SqlitePool>, Path(
              Ok((StatusCode::OK, format!("Booking {} cancelled successfully", booking_id)).into_response())
         } else {
              Err(AppError::NotFound(format!("Booking {} not found", booking_id)))
-        }
-        
-        
+        }      
 }
 
 pub async fn get_user_booking(State(pool): State<SqlitePool>, Path(user_id): Path<i32>) -> Result<Json<Vec<BookingRecord>>, AppError> {
