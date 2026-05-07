@@ -1,12 +1,27 @@
-use serde::{Deserialize, Serialize};
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
 use chrono::{DateTime, Utc};
-use axum::{http::StatusCode, response::{IntoResponse, Response}};
+use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
+use std::sync::{Arc, Mutex};
 
+pub const DB_ERR_OVERLAP: &str = "ERR_OVERLAP";
+
+
+#[derive(Clone)]
+pub struct AppState {
+    pub db: SqlitePool,
+    pub available_rooms: Arc<Mutex<i32>>,
+}
+#[derive(Debug)]
 pub enum AppError {
-    DatabaseError(sqlx::Error),
+    DatabaseError(sqlx::Error),     
     NotFound(String),
     Conflict(String),
     BadRequest(String),
+    Unauthorized(String),
 }
 
 impl From<sqlx::Error> for AppError {
@@ -17,20 +32,26 @@ impl From<sqlx::Error> for AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let(status, error_message) = match self {
-           AppError::DatabaseError(err) => {
-             tracing::error!("Database error: {:?}", err);
-             (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error".to_string())
-           }
-           AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.to_string()), 
-           AppError::Conflict(msg) => (StatusCode::CONFLICT, msg.to_string()),
-           AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.to_string()),
+        let (status, error_message) = match self {
+            AppError::DatabaseError(err) => {
+                tracing::error!("Database error: {:?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal Server Error".to_string(),
+                )
+            }
+            AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.to_string()),
+            AppError::Conflict(msg) => (StatusCode::CONFLICT, msg.to_string()),
+            AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.to_string()),
+            AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg.to_string()),
         };
-        (status, axum::Json(serde_json::json!({"error": error_message}))).into_response()
+        (
+            status,
+            axum::Json(serde_json::json!({"error": error_message})),
+        )
+            .into_response()
     }
 }
-
-
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum BookingState {
@@ -41,7 +62,6 @@ pub enum BookingState {
 
 #[derive(Debug, Deserialize)]
 pub struct CreateBookingRequest {
-    pub user_id: i32,
     pub room_id: i32,
     pub start_time: DateTime<Utc>,
     pub end_time: DateTime<Utc>,
