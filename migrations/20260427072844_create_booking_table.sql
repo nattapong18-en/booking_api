@@ -7,3 +7,4 @@ CREATE TABLE bookings (
     end_time DATETIME NOT NULL,
     status TEXT NOT NULL 
 );
+

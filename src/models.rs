@@ -4,24 +4,24 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
-use std::sync::{Arc, Mutex};
+use sqlx::{SqlitePool, prelude::FromRow};
 
 pub const DB_ERR_OVERLAP: &str = "ERR_OVERLAP";
-
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: SqlitePool,
-    pub available_rooms: Arc<Mutex<i32>>,
+    pub jwt_secret: String,
 }
+
 #[derive(Debug)]
 pub enum AppError {
-    DatabaseError(sqlx::Error),     
+    DatabaseError(sqlx::Error),
     NotFound(String),
     Conflict(String),
     BadRequest(String),
     Unauthorized(String),
+    InternalServerError(String),
 }
 
 impl From<sqlx::Error> for AppError {
@@ -44,6 +44,9 @@ impl IntoResponse for AppError {
             AppError::Conflict(msg) => (StatusCode::CONFLICT, msg.to_string()),
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.to_string()),
             AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg.to_string()),
+            AppError::InternalServerError(msg) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string())
+            }
         };
         (
             status,
@@ -81,4 +84,32 @@ pub struct BookingRecord {
 pub struct Claims {
     pub user_id: i32,
     pub exp: usize,
+}
+
+#[derive(Deserialize)]
+pub struct LoginRequest {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Deserialize)]
+pub struct RegisterRequest {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Serialize)]
+pub struct RegisterResponse {
+    pub message: String,
+}
+
+#[derive(Serialize)]
+pub struct AuthResponse {
+    pub token: String,
+}
+
+#[derive(FromRow)]
+pub struct UserRow {
+    pub id: i32,
+    pub password_hash: String,
 }
