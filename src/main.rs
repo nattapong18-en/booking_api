@@ -29,6 +29,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .expect("Invalid Database URL")
     .create_if_missing(true);
     let pool = SqlitePoolOptions::new().connect_with(connection_options).await?;
+    sqlx::migrate!("./migrations")
+    .run(&pool)
+    .await
+    .expect("Failed to run database migrations");
+
+    tracing::info!("Database migrations completed successfully!");
     let share_state = AppState {
         db: pool,
         jwt_secret,
