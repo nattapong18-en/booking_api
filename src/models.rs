@@ -1,10 +1,14 @@
 use axum::{
-    http::StatusCode,
-    response::{IntoResponse, Response},
+     http::StatusCode, response::{IntoResponse, Response}
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{SqlitePool, prelude::FromRow};
+use validator::Validate;
+use std::{collections::HashMap};
+use crate::validate::validate_password;
+
+
 
 pub const DB_ERR_OVERLAP: &str = "ERR_OVERLAP";
 
@@ -22,6 +26,7 @@ pub enum AppError {
     BadRequest(String),
     Unauthorized(String),
     InternalServerError(String),
+    ValidationError(HashMap<String, Vec<String>>),
 }
 
 impl From<sqlx::Error> for AppError {
@@ -47,6 +52,12 @@ impl IntoResponse for AppError {
             AppError::InternalServerError(msg) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string())
             }
+            AppError::ValidationError(fidld) => {
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    axum::Json(serde_json::json!({"errors": fidld})),
+                ).into_response();
+            } 
         };
         (
             status,
@@ -92,11 +103,15 @@ pub struct LoginRequest {
     pub password: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct RegisterRequest {
+    #[validate(length(min = 3 , message = "Username is too short"))]
     pub username: String,
+    #[validate(custom(function = "validate_password"))]
     pub password: String,
 }
+
+
 
 #[derive(Serialize)]
 pub struct RegisterResponse {
@@ -113,3 +128,7 @@ pub struct UserRow {
     pub id: i32,
     pub password_hash: String,
 }
+
+
+
+

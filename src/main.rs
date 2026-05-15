@@ -2,6 +2,7 @@ mod auth;
 mod handles;
 mod models;
 mod routes;
+mod validate;
 use std::str::FromStr;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -45,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = format!("0.0.0.0:{}", port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("Server running on {}", addr);
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app).await?;  
 
     Ok(())
 }

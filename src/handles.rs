@@ -1,5 +1,6 @@
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse, response::Response};
 use jsonwebtoken::{EncodingKey, Header};
+use validator::Validate;
 
 use crate::models::{
     AppError, AppState, AuthResponse, BookingRecord, BookingState, Claims, CreateBookingRequest,
@@ -171,10 +172,38 @@ pub async fn register(
     State(state): State<AppState>,
     Json(payload): Json<RegisterRequest>,
 ) -> Result<Json<RegisterResponse>, AppError> {
+    
+     payload.validate().map_err(|e| {
+        let fields = e.field_errors()
+        .iter()
+        .map(|(field, error)| {
+            let messages = error.iter()
+            .filter_map(|e| e.message.as_deref())
+            .map(|s| s.to_string())
+            .collect();
+            (field.to_string(), messages)
+        })
+        .collect();
+       AppError::ValidationError(fields)
+     })?;
+
     tracing::info!("User: {} is registering...", payload.username);
+
+    let user_exists: i64 = sqlx::query_scalar!(
+        "SELECT EXISTS(SELECT 1 FROM users WHERE username = ?)",
+        payload.username
+    )
+    .fetch_one(&state.db)
+    .await?;
+
+    if user_exists == 1 {
+        return Err(AppError::Conflict("This users in used".to_string()));
+    }   
+    
     let hashed_password = bcrypt::hash(&payload.password, bcrypt::DEFAULT_COST)
         .map_err(|_| AppError::InternalServerError("Invalid".to_string()))?;
 
+    
     sqlx::query!(
         "INSERT INTO users (username, password_hash) VALUES (?,?)",
         payload.username,
@@ -182,9 +211,117 @@ pub async fn register(
     )
     .execute(&state.db)
     .await
-    .map_err(|_| AppError::BadRequest("Username already exists".to_string()))?;
-
+    .map_err(|e| {
+        match e {
+            sqlx::Error::Database(db_err) => {
+                if db_err.is_unique_violation() {
+                    AppError::Conflict("Username already exists!".to_string())
+                } else {
+                    AppError::InternalServerError("Database logic error".to_string())
+                }
+            }
+            _ => AppError::InternalServerError("Datebase connection failed".to_string())
+        }
+    })?;
+    
     Ok(Json(RegisterResponse {
         message: "Register successful".to_string(),
     }))
 }
+
+
+
+
+
+
+
+
+
+
+
+#[cfg(test)]
+mod tests {
+     
+    use super::*; 
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        routing::post,
+        Router,
+    };
+    use tower::ServiceExt; 
+    use serde_json::json;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    
+    
+    async fn setup_test_state() -> AppState {
+        let pool = SqlitePoolOptions::new().
+        connect("sqlite::memory:")
+        .await
+        .unwrap();
+      
+       sqlx::query(
+    "CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL
+    );"
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+ 
+      AppState {
+        db: pool,
+        jwt_secret: "my_jwt_secret".to_string(),
+    } 
+  }  
+    #[tokio::test]
+    async fn test_register_success() {
+        let state = setup_test_state().await;
+
+        let app = Router::new()
+        .route("/register", post(register))
+        .with_state(state);
+         let payload = json!({
+        "username": "Nattapong",
+        "password": "12345679Bn"
+    });
+
+    let request = Request::builder()
+       .method("POST")
+       .uri("/register")
+       .header("content-type", "application/json")
+       .body(Body::from(serde_json::to_vec(&payload).unwrap())).unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    }
+ 
+
+
+
+
+
+    #[tokio::test]
+    async fn test_register_falid() {
+        let state = setup_test_state().await;
+        let app = Router::new()
+        .route("/register", post(register))
+        .with_state(state);
+        let payload = json!({
+            "username": "dd",
+            "password": "1234"
+        });
+
+        let request = Request::builder()
+        .method("POST")
+        .uri("/register")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&payload).unwrap())).unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        
+    }
+ }
