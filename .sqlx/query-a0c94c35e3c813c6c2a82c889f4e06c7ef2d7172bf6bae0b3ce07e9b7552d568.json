@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT room_id FROM rooms",
+  "describe": {
+    "columns": [
+      {
+        "name": "room_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a0c94c35e3c813c6c2a82c889f4e06c7ef2d7172bf6bae0b3ce07e9b7552d568"
+}
