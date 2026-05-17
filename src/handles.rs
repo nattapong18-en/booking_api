@@ -1,12 +1,23 @@
-use axum::{Json, extract::State, http::StatusCode, response::IntoResponse, response::Response};
+#![allow(dead_code)]
+use axum::{
+    Json,
+    extract::{Query, State},
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
 use jsonwebtoken::{EncodingKey, Header};
 use validator::Validate;
 
-use crate::models::{
-    AppError, AppState, AuthResponse, BookingRecord, BookingState, Claims, CreateBookingRequest,
-    DB_ERR_OVERLAP, LoginRequest, RegisterRequest, RegisterResponse, UserRow,
+use crate::{
+    getrooms::rooms_available,
+    models::{
+        AppError, AppState, AuthResponse, BookingRecord, BookingState, Claims,
+        CreateBookingRequest, DB_ERR_OVERLAP, GetRoom, LoginRequest, RegisterRequest,
+        RegisterResponse, RoomAvailability, UserRow,
+    },
 };
 use axum::extract::Path;
+use chrono::NaiveDate;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub async fn get_my_bookings(
@@ -172,20 +183,21 @@ pub async fn register(
     State(state): State<AppState>,
     Json(payload): Json<RegisterRequest>,
 ) -> Result<Json<RegisterResponse>, AppError> {
-    
-     payload.validate().map_err(|e| {
-        let fields = e.field_errors()
-        .iter()
-        .map(|(field, error)| {
-            let messages = error.iter()
-            .filter_map(|e| e.message.as_deref())
-            .map(|s| s.to_string())
+    payload.validate().map_err(|e| {
+        let fields = e
+            .field_errors()
+            .iter()
+            .map(|(field, error)| {
+                let messages = error
+                    .iter()
+                    .filter_map(|e| e.message.as_deref())
+                    .map(|s| s.to_string())
+                    .collect();
+                (field.to_string(), messages)
+            })
             .collect();
-            (field.to_string(), messages)
-        })
-        .collect();
-       AppError::ValidationError(fields)
-     })?;
+        AppError::ValidationError(fields)
+    })?;
 
     tracing::info!("User: {} is registering...", payload.username);
 
@@ -198,12 +210,11 @@ pub async fn register(
 
     if user_exists == 1 {
         return Err(AppError::Conflict("This users in used".to_string()));
-    }   
-    
+    }
+
     let hashed_password = bcrypt::hash(&payload.password, bcrypt::DEFAULT_COST)
         .map_err(|_| AppError::InternalServerError("Invalid".to_string()))?;
 
-    
     sqlx::query!(
         "INSERT INTO users (username, password_hash) VALUES (?,?)",
         payload.username,
@@ -211,117 +222,152 @@ pub async fn register(
     )
     .execute(&state.db)
     .await
-    .map_err(|e| {
-        match e {
-            sqlx::Error::Database(db_err) => {
-                if db_err.is_unique_violation() {
-                    AppError::Conflict("Username already exists!".to_string())
-                } else {
-                    AppError::InternalServerError("Database logic error".to_string())
-                }
+    .map_err(|e| match e {
+        sqlx::Error::Database(db_err) => {
+            if db_err.is_unique_violation() {
+                AppError::Conflict("Username already exists!".to_string())
+            } else {
+                AppError::InternalServerError("Database logic error".to_string())
             }
-            _ => AppError::InternalServerError("Datebase connection failed".to_string())
         }
+        _ => AppError::InternalServerError("Datebase connection failed".to_string()),
     })?;
-    
+
     Ok(Json(RegisterResponse {
         message: "Register successful".to_string(),
     }))
 }
 
+pub async fn get_room(
+    State(state): State<AppState>,
+    Query(payload): Query<GetRoom>,
+) -> Result<Json<Vec<RoomAvailability>>, AppError> {
+    tracing::info!("Get room: ...");
+    let today = chrono::Local::now().date_naive();
+    if payload.date_from < today {
+        return Err(AppError::BadRequest("date_from must be today".to_string()));
+    }
+    
+    if payload.date_to <= payload.date_from {
+        return Err(AppError::BadRequest("date_to must be after date_from".to_string()));
+    }
 
+    let rooms = sqlx::query!("SELECT room_id FROM rooms")
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| AppError::InternalServerError(e.to_string()))?;
 
+    let mut result = Vec::new();
+    for room in rooms {
+        let bookings = sqlx::query!(
+            "SELECT start_time, end_time FROM bookings WHERE room_id = ?",
+            room.room_id
+        )
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| AppError::InternalServerError(e.to_string()))?;
 
+        let data_pair: Vec<(NaiveDate, NaiveDate)> = bookings
+            .iter()
+            .map(|b| {
+                let check_in = b.start_time.date();
+                let check_out = b.end_time.date();
+                (check_in, check_out)
+            })
+            .collect();
 
+        let status = if rooms_available(&data_pair, payload.date_from, payload.date_to) {
+            "available"
+        } else {
+            "occupied"
+        };
 
+        result.push(RoomAvailability {
+            room_id: room.room_id,
+            status: status.to_string(),
+        });
+    }
 
-
-
-
+    Ok(Json(result))
+}
 
 #[cfg(test)]
 mod tests {
-     
-    use super::*; 
+
+    use super::*;
     use axum::{
+        Router,
         body::Body,
         http::{Request, StatusCode},
         routing::post,
-        Router,
     };
-    use tower::ServiceExt; 
     use serde_json::json;
     use sqlx::sqlite::SqlitePoolOptions;
+    use tower::ServiceExt;
 
-    
-    
     async fn setup_test_state() -> AppState {
-        let pool = SqlitePoolOptions::new().
-        connect("sqlite::memory:")
-        .await
-        .unwrap();
-      
-       sqlx::query(
-    "CREATE TABLE users (
+        let pool = SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT NOT NULL UNIQUE,
         password_hash TEXT NOT NULL
-    );"
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
- 
-      AppState {
-        db: pool,
-        jwt_secret: "my_jwt_secret".to_string(),
-    } 
-  }  
+    );",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        AppState {
+            db: pool,
+            jwt_secret: "my_jwt_secret".to_string(),
+        }
+    }
     #[tokio::test]
     async fn test_register_success() {
         let state = setup_test_state().await;
 
         let app = Router::new()
-        .route("/register", post(register))
-        .with_state(state);
-         let payload = json!({
-        "username": "Nattapong",
-        "password": "12345679Bn"
-    });
+            .route("/register", post(register))
+            .with_state(state);
+        let payload = json!({
+            "username": "Nattapong",
+            "password": "12345679Bn"
+        });
 
-    let request = Request::builder()
-       .method("POST")
-       .uri("/register")
-       .header("content-type", "application/json")
-       .body(Body::from(serde_json::to_vec(&payload).unwrap())).unwrap();
+        let request = Request::builder()
+            .method("POST")
+            .uri("/register")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+            .unwrap();
 
-    let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
- 
-
-
-
-
 
     #[tokio::test]
     async fn test_register_falid() {
         let state = setup_test_state().await;
         let app = Router::new()
-        .route("/register", post(register))
-        .with_state(state);
+            .route("/register", post(register))
+            .with_state(state);
         let payload = json!({
             "username": "dd",
             "password": "1234"
         });
 
         let request = Request::builder()
-        .method("POST")
-        .uri("/register")
-        .header("content-type", "application/json")
-        .body(Body::from(serde_json::to_vec(&payload).unwrap())).unwrap();
+            .method("POST")
+            .uri("/register")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+            .unwrap();
         let response = app.clone().oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-        
     }
- }
+}

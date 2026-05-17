@@ -1,4 +1,5 @@
 mod auth;
+mod getrooms;
 mod handles;
 mod models;
 mod routes;
@@ -25,15 +26,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::fs::create_dir_all(parent_dir).expect("Failed to create database directory")
         }
     }
-    
+
     let connection_options = SqliteConnectOptions::from_str(&db_url)
-    .expect("Invalid Database URL")
-    .create_if_missing(true);
-    let pool = SqlitePoolOptions::new().connect_with(connection_options).await?;
+        .expect("Invalid Database URL")
+        .create_if_missing(true);
+    let pool = SqlitePoolOptions::new()
+        .connect_with(connection_options)
+        .await?;
     sqlx::migrate!("./migrations")
-    .run(&pool)
-    .await
-    .expect("Failed to run database migrations");
+        .run(&pool)
+        .await
+        .expect("Failed to run database migrations");
 
     tracing::info!("Database migrations completed successfully!");
     let share_state = AppState {
@@ -46,7 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = format!("0.0.0.0:{}", port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("Server running on {}", addr);
-    axum::serve(listener, app).await?;  
+    axum::serve(listener, app).await?;
 
     Ok(())
 }

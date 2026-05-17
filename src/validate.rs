@@ -1,6 +1,6 @@
-use validator:: ValidationError;
+use validator::ValidationError;
 
-pub fn validate_password(password: &str) -> Result<() , ValidationError> {
+pub fn validate_password(password: &str) -> Result<(), ValidationError> {
     let has_uppercase = password.chars().any(|c| c.is_uppercase());
     let has_lowercase = password.chars().any(|c| c.is_lowercase());
     let has_digit = password.chars().any(|c| c.is_numeric());
@@ -14,9 +14,9 @@ pub fn validate_password(password: &str) -> Result<() , ValidationError> {
 
     if !has_uppercase || !has_lowercase || !has_digit {
         let mut error = ValidationError::new("format");
-        error.message = Some("Password must contain as least one uppercase, one lowercase, and number".into());
+        error.message =
+            Some("Password must contain as least one uppercase, one lowercase, and number".into());
         return Err(error);
     }
     Ok(())
 }
-

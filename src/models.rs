@@ -1,14 +1,15 @@
+#![allow(dead_code)]
+use crate::validate::validate_password;
 use axum::{
-     http::StatusCode, response::{IntoResponse, Response}
+    http::StatusCode,
+    response::{IntoResponse, Response},
 };
+use chrono::NaiveDate;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{SqlitePool, prelude::FromRow};
+use std::collections::HashMap;
 use validator::Validate;
-use std::{collections::HashMap};
-use crate::validate::validate_password;
-
-
 
 pub const DB_ERR_OVERLAP: &str = "ERR_OVERLAP";
 
@@ -56,8 +57,9 @@ impl IntoResponse for AppError {
                 return (
                     StatusCode::UNPROCESSABLE_ENTITY,
                     axum::Json(serde_json::json!({"errors": fidld})),
-                ).into_response();
-            } 
+                )
+                    .into_response();
+            }
         };
         (
             status,
@@ -105,13 +107,11 @@ pub struct LoginRequest {
 
 #[derive(Deserialize, Validate)]
 pub struct RegisterRequest {
-    #[validate(length(min = 3 , message = "Username is too short"))]
+    #[validate(length(min = 3, message = "Username is too short"))]
     pub username: String,
     #[validate(custom(function = "validate_password"))]
     pub password: String,
 }
-
-
 
 #[derive(Serialize)]
 pub struct RegisterResponse {
@@ -129,6 +129,14 @@ pub struct UserRow {
     pub password_hash: String,
 }
 
+#[derive(Deserialize)]
+pub struct GetRoom {
+    pub date_from: NaiveDate,
+    pub date_to: NaiveDate,
+}
 
-
-
+#[derive(Serialize)]
+pub struct RoomAvailability {
+    pub room_id: i64,
+    pub status: String,
+}
