@@ -5,6 +5,7 @@ A room bookings API built with RUST and AXUM
 ## Setup
 
 cp .env.example .env
+
 cargo run
 
 # Get available rooms
