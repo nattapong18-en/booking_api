@@ -90,7 +90,7 @@ pub async fn create_booking(
         return Err(AppError::BadRequest("Invalid duration".to_string()));
     }
     let mut tx = state.db.begin().await?;
-    sqlx::query!("BEGIN IMMEDIATE").execute(&mut *tx).await?;
+    
 
     let over_lap_check = sqlx::query!(
             "SELECT COUNT(*) as count FROM bookings WHERE room_id = ? AND status != 'Cancelled' AND start_time < ? AND end_time > ?",
