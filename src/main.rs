@@ -5,7 +5,7 @@ mod models;
 mod routes;
 mod validate;
 use std::str::FromStr;
-
+use tower_http::cors::{CorsLayer};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
 use crate::models::AppState;
@@ -44,7 +44,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         jwt_secret,
     };
 
-    let app = routes::create_router(share_state);
+    let app = routes::create_router(share_state)
+              .layer(CorsLayer::permissive());
+        
     let port = std::env::var("PORT").unwrap_or_else(|_| "10000".to_string());
     let addr = format!("0.0.0.0:{}", port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
