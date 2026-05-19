@@ -1,6 +1,6 @@
 # Booking API
 
-[![CI](https://github.com/nattapong18-en/booking_api/actions/workflows/ci.yml/badge.svg)](https://github.com/nattapong18-en/booking_api/actions/workflows/ci.yml)
+
 
 A room booking API built with **Rust** and **Axum**.
 
