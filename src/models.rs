@@ -7,7 +7,7 @@ use axum::{
 use chrono::NaiveDate;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{SqlitePool, prelude::FromRow};
+use sqlx::{prelude::FromRow};
 use std::collections::HashMap;
 use validator::Validate;
 
@@ -15,7 +15,7 @@ pub const DB_ERR_OVERLAP: &str = "ERR_OVERLAP";
 
 #[derive(Clone)]
 pub struct AppState {
-    pub db: SqlitePool,
+    pub db: sqlx::PgPool,
     pub jwt_secret: String,
 }
 
@@ -137,6 +137,6 @@ pub struct GetRoom {
 
 #[derive(Serialize)]
 pub struct RoomAvailability {
-    pub room_id: i64,
+    pub room_id: i32,
     pub status: String,
 }

@@ -13,7 +13,7 @@ use crate::{
     models::{
         AppError, AppState, AuthResponse, BookingRecord, BookingState, Claims,
         CreateBookingRequest, DB_ERR_OVERLAP, GetRoom, LoginRequest, RegisterRequest,
-        RegisterResponse, RoomAvailability, UserRow,
+        RegisterResponse, RoomAvailability,UserRow,
     },
 };
 use axum::extract::Path;
@@ -27,7 +27,7 @@ pub async fn get_my_bookings(
     tracing::info!("Fetching bookings for user id: {}", claims.user_id);
 
     let rows = sqlx::query!(
-        "SELECT booking_id, user_id, room_id, start_time, end_time, status FROM bookings WHERE user_id = ?",
+        "SELECT booking_id, user_id, room_id, start_time, end_time, status FROM bookings WHERE user_id = $1",
         claims.user_id
     )
     .fetch_all(&state.db)
@@ -46,8 +46,8 @@ pub async fn get_my_bookings(
                 booking_id: row.booking_id as i32,
                 user_id: row.user_id as i32,
                 room_id: row.room_id as i32,
-                start_time: row.start_time.and_utc(),
-                end_time: row.end_time.and_utc(),
+                start_time: row.start_time,
+                end_time: row.end_time,
                 state: current_state,
             }
         })
@@ -65,7 +65,7 @@ pub async fn cancel_booking(
         booking_id
     );
     let result = sqlx::query!(
-        "UPDATE bookings SET status = 'Cancelled' WHERE booking_id = ? AND user_id = ? AND status = 'Confirmed'",
+        "UPDATE bookings SET status = 'Cancelled' WHERE booking_id = $1 AND user_id = $2 AND status = 'Confirmed'",
         booking_id,
         claims.user_id
         )
@@ -93,7 +93,7 @@ pub async fn create_booking(
     
 
     let over_lap_check = sqlx::query!(
-            "SELECT COUNT(*) as count FROM bookings WHERE room_id = ? AND status != 'Cancelled' AND start_time < ? AND end_time > ?",
+            "SELECT COUNT(*) as count FROM bookings WHERE room_id = $1 AND status != 'Cancelled' AND start_time < $2 AND end_time > $3",
             payload.room_id,
             payload.end_time,
             payload.start_time,
@@ -101,18 +101,20 @@ pub async fn create_booking(
         .fetch_one(&mut *tx)
         .await?;
 
-    let max_capacity = 100;
-    if over_lap_check.count >= max_capacity {
-        return Err(AppError::Conflict(
-            "Booking time overlaps with an existing booking (Room is full)".to_string(),
-        ));
+    let max_capacity = 1;
+    let count = over_lap_check.count.unwrap_or(5);
+    if count >= max_capacity {
+        return Err(AppError::Conflict("
+        booking time overlap with an existing booking"
+        .to_string())
+      );
     }
 
-    let insert_result = sqlx::query!(
-            r#"INSERT INTO bookings (user_id, room_id, start_time, end_time, status) VALUES (?, ?, ?, ?, ?)"#,
+    let insert_result = sqlx::query_scalar!(
+            r#"INSERT INTO bookings (user_id, room_id, start_time, end_time, status) VALUES ($1, $2, $3, $4, $5) RETURNING booking_id"#,
             claims.user_id, payload.room_id, payload.start_time, payload.end_time, "Confirmed"
         )
-        .execute(&mut *tx)
+        .fetch_one(&mut *tx)
         .await
         .map_err(|e| {
             if let Some(db_err) = e.as_database_error() {
@@ -123,7 +125,7 @@ pub async fn create_booking(
             AppError::from(e)
         })?;
     tx.commit().await?;
-    let booking_id = insert_result.last_insert_rowid() as i32;
+    let booking_id = insert_result;
     let response = BookingRecord {
         booking_id,
         user_id: claims.user_id,
@@ -143,7 +145,7 @@ pub async fn login(
     tracing::info!("User ID: {:?} is Login...", payload.username);
     let users = sqlx::query_as!(
         UserRow,
-        r#"SELECT id as "id!: i32", password_hash FROM users WHERE username = ?"#,
+        r#"SELECT id as "id!: i32", password_hash FROM users WHERE username = $1"#,
         payload.username
     )
     .fetch_optional(&state.db)
@@ -201,14 +203,15 @@ pub async fn register(
 
     tracing::info!("User: {} is registering...", payload.username);
 
-    let user_exists: i64 = sqlx::query_scalar!(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE username = ?)",
+    let user_exists = sqlx::query_scalar!(
+        "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)",
         payload.username
     )
     .fetch_one(&state.db)
-    .await?;
+    .await?
+    .unwrap_or(false);
 
-    if user_exists == 1 {
+    if user_exists  {
         return Err(AppError::Conflict("This users in used".to_string()));
     }
 
@@ -216,7 +219,7 @@ pub async fn register(
         .map_err(|_| AppError::InternalServerError("Invalid".to_string()))?;
 
     sqlx::query!(
-        "INSERT INTO users (username, password_hash) VALUES (?,?)",
+        "INSERT INTO users (username, password_hash) VALUES ($1,$2)",
         payload.username,
         hashed_password,
     )
@@ -260,7 +263,7 @@ pub async fn get_room(
     let mut result = Vec::new();
     for room in rooms {
         let bookings = sqlx::query!(
-            "SELECT start_time, end_time FROM bookings WHERE room_id = ?",
+            "SELECT start_time, end_time FROM bookings WHERE room_id = $1",
             room.room_id
         )
         .fetch_all(&state.db)
@@ -270,8 +273,8 @@ pub async fn get_room(
         let data_pair: Vec<(NaiveDate, NaiveDate)> = bookings
             .iter()
             .map(|b| {
-                let check_in = b.start_time.date();
-                let check_out = b.end_time.date();
+                let check_in = b.start_time.date_naive();
+                let check_out = b.end_time.date_naive();
                 (check_in, check_out)
             })
             .collect();

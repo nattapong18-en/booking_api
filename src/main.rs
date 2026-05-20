@@ -4,9 +4,11 @@ mod handles;
 mod models;
 mod routes;
 mod validate;
-use std::str::FromStr;
+
 use tower_http::cors::{CorsLayer};
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::postgres::{PgPoolOptions, PgConnectOptions};
+
+
 
 use crate::models::AppState;
 
@@ -18,21 +20,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
     let db_url = std::env::var("DATABASE_URL")?;
     let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set in .env");
-    if db_url.starts_with("sqlite:///") {
-        let path = db_url
-            .strip_prefix("sqlite://")
-            .expect("Invalid DATABASE_URL format");
-        if let Some(parent_dir) = std::path::Path::new(path).parent() {
-            std::fs::create_dir_all(parent_dir).expect("Failed to create database directory")
-        }
-    }
+    
+    let options = db_url
+        .parse::<PgConnectOptions>()?
+        .ssl_mode(sqlx::postgres::PgSslMode::Require);
 
-    let connection_options = SqliteConnectOptions::from_str(&db_url)
-        .expect("Invalid Database URL")
-        .create_if_missing(true);
-    let pool = SqlitePoolOptions::new()
-        .connect_with(connection_options)
+    
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect_with(options)
         .await?;
+
     sqlx::migrate!("./migrations")
         .run(&pool)
         .await
