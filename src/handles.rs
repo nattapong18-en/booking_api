@@ -305,18 +305,28 @@ mod tests {
         routing::post,
     };
     use serde_json::json;
-    use sqlx::sqlite::SqlitePoolOptions;
+    use sqlx::postgres::PgPoolOptions;
     use tower::ServiceExt;
 
     async fn setup_test_state() -> AppState {
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(
+                "postgres://localhost/booking_test"
+            )
             .await
             .unwrap();
+        
+             sqlx::query(
+            "DROP TABLE IF EXISTS users CASCADE"
+            )
+            .execute(&pool)
+            .await
+           .unwrap();
 
-        sqlx::query(
-            "CREATE TABLE users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sqlx::query(    
+            "CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
         username TEXT NOT NULL UNIQUE,
         password_hash TEXT NOT NULL
     );",
