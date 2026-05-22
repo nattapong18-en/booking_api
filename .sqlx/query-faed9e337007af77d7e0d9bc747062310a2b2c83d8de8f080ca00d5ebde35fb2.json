@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT start_time, end_time FROM bookings WHERE room_id = $1",
+  "query": "SELECT start_time, end_time FROM bookings WHERE room_id = $1 AND status != 'Cancelled'",
   "describe": {
     "columns": [
       {
@@ -24,5 +24,5 @@
       false
     ]
   },
-  "hash": "ff2a9b4410ffeb08152c1b05d8ba45c00e20a47cc384d65641275edfd7486a27"
+  "hash": "faed9e337007af77d7e0d9bc747062310a2b2c83d8de8f080ca00d5ebde35fb2"
 }

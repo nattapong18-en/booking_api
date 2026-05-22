@@ -322,7 +322,7 @@ pub async fn get_room(
     let mut result = Vec::new();
     for room in rooms {
         let bookings = sqlx::query!(
-            "SELECT start_time, end_time FROM bookings WHERE room_id = $1",
+            "SELECT start_time, end_time FROM bookings WHERE room_id = $1 AND status != 'Cancelled'",
             room.room_id
         )
         .fetch_all(&state.db)
