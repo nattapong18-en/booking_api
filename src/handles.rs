@@ -19,6 +19,7 @@ use crate::{
 use axum::extract::Path;
 use chrono::NaiveDate;
 use std::time::{SystemTime, UNIX_EPOCH};
+use redis::{AsyncCommands, RedisError};
 
 pub async fn get_my_bookings(
     claims: Claims,
@@ -64,6 +65,29 @@ pub async fn cancel_booking(
         claims.user_id,
         booking_id
     );
+
+    let booking = sqlx::query!(
+        "SELECT start_time, end_time FROM bookings WHERE booking_id = $1 AND user_id = $2 AND status = 'Confirmed'",
+        booking_id,
+        claims.user_id
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Booking not found or not confirmed".to_string()))?;
+   
+    {
+        let mut redis_conn = state.redis.get()
+        .await
+        .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+        let cache_key = format!("
+        rooms:{}:{}",
+        booking.start_time.format("%Y-%m-%d"),
+        booking.end_time.format("%Y-%m-%d"),
+       );
+       let _: Result<(), RedisError> = redis_conn.del(&cache_key).await;
+    }
+    
+
     let result = sqlx::query!(
         "UPDATE bookings SET status = 'Cancelled' WHERE booking_id = $1 AND user_id = $2 AND status = 'Confirmed'",
         booking_id,
@@ -76,6 +100,8 @@ pub async fn cancel_booking(
             "Booking not found, already cancelled, or unauthorized".to_string(),
         ));
     }
+
+    
 
     Ok(StatusCode::OK.into_response())
 }
@@ -91,6 +117,7 @@ pub async fn create_booking(
     }
     let mut tx = state.db.begin().await?;
     
+
 
     let over_lap_check = sqlx::query!(
             "SELECT COUNT(*) as count FROM bookings WHERE room_id = $1 AND status != 'Cancelled' AND start_time < $2 AND end_time > $3",
@@ -125,6 +152,18 @@ pub async fn create_booking(
             AppError::from(e)
         })?;
     tx.commit().await?;
+    
+    let mut redis_conn = state.redis.get()
+        .await
+        .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+    let cache_key = format!(
+        "room:{}:{}",
+        payload.start_time.format("%Y-%m-%d"),
+        payload.end_time.format("%Y-%m-%d"),
+    );
+
+    let _: Result<(), RedisError> = redis_conn.del(&cache_key).await;
+
     let booking_id = insert_result;
     let response = BookingRecord {
         booking_id,
@@ -254,6 +293,26 @@ pub async fn get_room(
     if payload.date_to <= payload.date_from {
         return Err(AppError::BadRequest("date_to must be after date_from".to_string()));
     }
+    
+    let cache_key = format!(
+        "rooms:{}:{}",
+     payload.date_from.format("&Y-%m-%d"),
+     payload.date_to.format("%Y-%m-%d"),
+    );
+
+    {
+        let mut redis_conn = state.redis.get()
+            .await
+            .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+        let cache: Option<String> = redis_conn.get(&cache_key)
+            .await
+            .unwrap_or(None);
+        if let Some(json) = cache {
+            if let Ok(rooms) = serde_json::from_str::<Vec<RoomAvailability>>(&json) {
+                return Ok(Json(rooms));
+            }
+        }       
+    }
 
     let rooms = sqlx::query!("SELECT room_id FROM rooms")
         .fetch_all(&state.db)
@@ -290,6 +349,16 @@ pub async fn get_room(
             status: status.to_string(),
         });
     }
+    
+    {
+        let mut redis_conn = state.redis.get()
+            .await
+            .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+        if let Ok(json) = serde_json::to_string(&result) {
+            let _: Result<(), redis::RedisError> = redis_conn.set_ex(&cache_key, json, 60).
+            await;
+        }  
+    }
 
     Ok(Json(result))
 }
@@ -307,8 +376,12 @@ mod tests {
     use serde_json::json;
     use sqlx::postgres::PgPoolOptions;
     use tower::ServiceExt;
+    use deadpool_redis::{Config, Runtime};
 
     async fn setup_test_state() -> AppState {
+        
+        let redis_cofig = Config::from_url("redis://127.0.0.1");
+        let redis_pool = redis_cofig.create_pool(Some(Runtime::Tokio1)).expect("Failed to create Redis pool");
         let pool = PgPoolOptions::new()
             .max_connections(1)
             .connect(
@@ -338,6 +411,7 @@ mod tests {
         AppState {
             db: pool,
             jwt_secret: "my_jwt_secret".to_string(),
+            redis:redis_pool,
         }
     }
     #[tokio::test]

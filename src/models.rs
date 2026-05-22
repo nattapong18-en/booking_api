@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{prelude::FromRow};
 use std::collections::HashMap;
 use validator::Validate;
+use deadpool_redis::Pool as RedisPool;
 
 pub const DB_ERR_OVERLAP: &str = "ERR_OVERLAP";
 
@@ -17,6 +18,7 @@ pub const DB_ERR_OVERLAP: &str = "ERR_OVERLAP";
 pub struct AppState {
     pub db: sqlx::PgPool,
     pub jwt_secret: String,
+    pub redis: RedisPool,
 }
 
 #[derive(Debug)]
@@ -135,7 +137,7 @@ pub struct GetRoom {
     pub date_to: NaiveDate,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct RoomAvailability {
     pub room_id: i32,
     pub status: String,

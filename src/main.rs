@@ -7,6 +7,7 @@ mod validate;
 
 use tower_http::cors::{CorsLayer};
 use sqlx::postgres::{PgPoolOptions, PgConnectOptions};
+use deadpool_redis::{Config, Runtime};
 
 
 
@@ -20,6 +21,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
     let db_url = std::env::var("DATABASE_URL")?;
     let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set in .env");
+    let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1".to_string());
+    let mut redis_config = Config::from_url(&redis_url);
+    redis_config.pool = Some(deadpool_redis::PoolConfig {
+        max_size: 5,
+        ..Default::default()
+    });
+    let redis_pool = redis_config.create_pool(Some(Runtime::Tokio1)).expect("Failed to create Redis pool");
     
     let options = db_url
         .parse::<PgConnectOptions>()?
@@ -40,6 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let share_state = AppState {
         db: pool,
         jwt_secret,
+        redis: redis_pool,
     };
 
     let app = routes::create_router(share_state)
