@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT start_time, end_time FROM bookings WHERE booking_id = $1 AND user_id = $2 AND status = 'Confirmed'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "start_time",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 1,
+        "name": "end_time",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "552a54885d8bf0b34f72eb2cb411de538b8dadf413955fded99cfd1ec902966a"
+}
