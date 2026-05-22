@@ -79,8 +79,8 @@ pub async fn cancel_booking(
         let mut redis_conn = state.redis.get()
         .await
         .map_err(|e| AppError::InternalServerError(e.to_string()))?;
-        let cache_key = format!("
-        rooms:{}:{}",
+        let cache_key = format!(
+        "rooms:{}:{}",
         booking.start_time.format("%Y-%m-%d"),
         booking.end_time.format("%Y-%m-%d"),
        );
